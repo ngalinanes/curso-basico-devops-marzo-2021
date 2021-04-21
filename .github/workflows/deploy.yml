@@ -1,0 +1,71 @@
+name: Build and Deploy EKS
+
+on: push
+
+env:
+  DOCKER_IMAGE: ngalinanes/desafio-craftech
+  K8S_NAMESPACE_PROD: desafio-prod
+  K8S_NAMESPACE_DEV: desafio-dev
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: desafio-craftech
+
+jobs:
+  push_to_registry:
+    name: Push Docker image to Docker Hub
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v2
+
+      - name: Push image backend to Docker Hub
+        uses: docker/build-push-action@v1
+        if: ${{ github.ref == 'refs/heads/main' && github.ref == 'refs/heads/dev'}}
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          repository: ngalinanes/desafio-craftech
+          tag_with_ref: true
+          tag_with_sha: true
+          tags: backend, backend.${{ github.sha }}
+
+      - name: Push image frontend to Docker Hub
+        uses: docker/build-push-action@v1
+        if: ${{ github.ref == 'refs/heads/main' && github.ref == 'refs/heads/dev'}}
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          repository: ngalinanes/desafio-craftech
+          tag_with_ref: true
+          tag_with_sha: true
+          tags: frontend, frontend.${{ github.sha }}
+          
+      - name: Deploy the Docker image to the kubernetes cluster dev
+        if: ${{ github.ref == 'refs/heads/dev' }}
+        uses: cancue/eks-action@v0.0.2
+        env:
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_region: $AWS_REGION
+          cluster_name: $EKS_CLUSTER_NAME
+        with:
+          args: |
+            kubectl set image deployment backend -n $K8S_NAMESPACE_DEV backend=$DOCKER_IMAGE:backend.${{ github.sha }}
+            kubectl set image deployment frontend -n $K8S_NAMESPACE_DEV frontend=$DOCKER_IMAGE:frontend.${{ github.sha }}
+            kubectl rollout status deployment/backend -n $K8S_NAMESPACE_DEV
+            kubectl rollout status deployment/frontend -n $K8S_NAMESPACE_DEV
+    
+      - name: Deploy the Docker image to the kubernetes cluster prod
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: cancue/eks-action@v0.0.2
+        env:
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_region: $AWS_REGION
+          cluster_name: $EKS_CLUSTER_NAME
+        with:
+          args: |
+            kubectl set image deployment backend -n $K8S_NAMESPACE_PROD backend=$DOCKER_IMAGE:backend.${{ github.sha }}
+            kubectl set image deployment frontend -n $K8S_NAMESPACE_PROD frontend=$DOCKER_IMAGE:frontend.${{ github.sha }}
+            kubectl rollout status deployment/backend -n $K8S_NAMESPACE_PROD
+            kubectl rollout status deployment/frontend -n $K8S_NAMESPACE_PROD
